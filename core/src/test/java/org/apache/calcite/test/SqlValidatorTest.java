@@ -1934,6 +1934,10 @@ public class SqlValidatorTest extends SqlValidatorTestCase {
         .columnType("DOUBLE NOT NULL");
     expr("element(multiset[multiset[cast(null as tinyint)]])")
         .columnType("TINYINT MULTISET NOT NULL");
+    // Test case for <a href="https://issues.apache.org/jira/projects/CALCITE/issues/CALCITE-6227">
+    // ELEMENT(NULL) causes an assertion failure</a>.
+    expr("element(null)")
+        .columnType("NULL");
   }
 
   @Test void testMemberOf() {
@@ -11413,6 +11417,14 @@ public class SqlValidatorTest extends SqlValidatorTestCase {
     expr("json_value('{\"foo\":100}', 'lax $.foo' returning boolean"
         + " default 100 on empty)")
         .columnType("BOOLEAN");
+
+    expr("json_value('{\"foo\":[100, null, 200]}', 'lax $.foo'"
+        + "returning integer array)")
+        .columnType("INTEGER ARRAY");
+
+    expr("json_value('{\"foo\":[[100, null, 200]]}', 'lax $.foo'"
+        + "returning integer array array)")
+        .columnType("INTEGER ARRAY ARRAY");
   }
 
   @Test void testJsonQuery() {

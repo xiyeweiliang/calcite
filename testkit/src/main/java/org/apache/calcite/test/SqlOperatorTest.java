@@ -133,6 +133,7 @@ import static org.apache.calcite.sql.test.SqlOperatorFixture.INVALID_EXTRACT_UNI
 import static org.apache.calcite.sql.test.SqlOperatorFixture.INVALID_EXTRACT_UNIT_VALIDATION_ERROR;
 import static org.apache.calcite.sql.test.SqlOperatorFixture.LITERAL_OUT_OF_RANGE_MESSAGE;
 import static org.apache.calcite.sql.test.SqlOperatorFixture.OUT_OF_RANGE_MESSAGE;
+import static org.apache.calcite.sql.test.SqlOperatorFixture.WRONG_FORMAT_MESSAGE;
 import static org.apache.calcite.util.DateTimeStringUtils.getDateFormatter;
 
 import static org.hamcrest.CoreMatchers.equalTo;
@@ -623,13 +624,16 @@ public class SqlOperatorTest {
 
       // Overflow test
       if (numeric == Numeric.BIGINT) {
-        // Literal of range
+        // Calcite cannot even represent a literal so large, so
+        // for this query even the safe casts fail at compile-time
+        // (runtime == false).
         f.checkCastFails(numeric.maxOverflowNumericString,
             type, LITERAL_OUT_OF_RANGE_MESSAGE, false, castType);
         f.checkCastFails(numeric.minOverflowNumericString,
             type, LITERAL_OUT_OF_RANGE_MESSAGE, false, castType);
       } else {
-        if (numeric != Numeric.DECIMAL5_2 || Bug.CALCITE_2539_FIXED) {
+        if (numeric != Numeric.DECIMAL5_2) {
+          // This condition is for bug [CALCITE-6078], not yet fixed
           f.checkCastFails(numeric.maxOverflowNumericString,
               type, OUT_OF_RANGE_MESSAGE, true, castType);
           f.checkCastFails(numeric.minOverflowNumericString,
@@ -643,11 +647,12 @@ public class SqlOperatorTest {
       f.checkCastToScalarOkay("'" + numeric.minNumericString + "'",
           type, numeric.minNumericString, castType);
 
-      if (Bug.CALCITE_2539_FIXED) {
+      if (numeric != Numeric.DECIMAL5_2) {
+        // The above condition is for bug CALCITE-6078
         f.checkCastFails("'" + numeric.maxOverflowNumericString + "'",
-            type, OUT_OF_RANGE_MESSAGE, true, castType);
+            type, WRONG_FORMAT_MESSAGE, true, castType);
         f.checkCastFails("'" + numeric.minOverflowNumericString + "'",
-            type, OUT_OF_RANGE_MESSAGE, true, castType);
+            type, WRONG_FORMAT_MESSAGE, true, castType);
       }
 
       // Convert from type to string
@@ -657,10 +662,8 @@ public class SqlOperatorTest {
       f.checkCastToString(numeric.minNumericString, null, null, castType);
       f.checkCastToString(numeric.minNumericString, type, null, castType);
 
-      if (Bug.CALCITE_2539_FIXED) {
-        f.checkCastFails("'notnumeric'", type, INVALID_CHAR_MESSAGE, true,
-            castType);
-      }
+      f.checkCastFails("'notnumeric'", type, INVALID_CHAR_MESSAGE, true,
+          castType);
     });
   }
 
@@ -1128,14 +1131,14 @@ public class SqlOperatorTest {
     // ExceptionInInitializerError.
     f.checkScalarExact("cast('15' as integer)", "INTEGER NOT NULL", "15");
     if (castType == CastType.CAST) { // Safe casts should not fail
-      f.checkFails("cast('15.4' as integer)", "Number has wrong format.*", true);
-      f.checkFails("cast('15.6' as integer)", "Number has wrong format.*", true);
+      f.checkFails("cast('15.4' as integer)", WRONG_FORMAT_MESSAGE, true);
+      f.checkFails("cast('15.6' as integer)", WRONG_FORMAT_MESSAGE, true);
       f.checkFails("cast('ue' as boolean)", "Invalid character for cast.*", true);
       f.checkFails("cast('' as boolean)", "Invalid character for cast.*", true);
-      f.checkFails("cast('' as integer)", "Number has wrong format.*", true);
-      f.checkFails("cast('' as real)", "Number has wrong format.*", true);
-      f.checkFails("cast('' as double)", "Number has wrong format.*", true);
-      f.checkFails("cast('' as smallint)", "Number has wrong format.*", true);
+      f.checkFails("cast('' as integer)", WRONG_FORMAT_MESSAGE, true);
+      f.checkFails("cast('' as real)", WRONG_FORMAT_MESSAGE, true);
+      f.checkFails("cast('' as double)", WRONG_FORMAT_MESSAGE, true);
+      f.checkFails("cast('' as smallint)", WRONG_FORMAT_MESSAGE, true);
     } else {
       f.checkNull("cast('15.4' as integer)");
       f.checkNull("cast('15.6' as integer)");
@@ -9140,6 +9143,22 @@ public class SqlOperatorTest {
     final SqlOperatorFixture f = fixture();
     checkSubstringFunction(f);
     checkSubstringFunction(f.withConformance(SqlConformanceEnum.BIG_QUERY));
+    checkSubstringFunctionOverflow(f);
+    checkSubstringFunctionOverflow(f.withConformance(SqlConformanceEnum.BIG_QUERY));
+  }
+
+  /**
+   * Test case for <a href="https://issues.apache.org/jira/browse/CALCITE-6211">
+   * SUBSTRING with Integer.MIN_VALUE as a second parameter raise unexpected exception</a>. */
+  private static void checkSubstringFunctionOverflow(SqlOperatorFixture f) {
+    f.setFor(SqlStdOperatorTable.SUBSTRING);
+    f.checkScalar(
+        String.format(Locale.ROOT, "{fn SUBSTRING('abcdef', %d)}", Integer.MIN_VALUE),
+        "abcdef", "VARCHAR(6) NOT NULL");
+
+    f.checkScalar(
+        String.format(Locale.ROOT, "{fn SUBSTRING('abcdef', CAST(%d AS BIGINT))}",
+            Integer.MIN_VALUE), "abcdef", "VARCHAR(6) NOT NULL");
   }
 
   private static void checkSubstringFunction(SqlOperatorFixture f) {
@@ -9163,6 +9182,9 @@ public class SqlOperatorTest {
           "Substring error: negative substring length not allowed",
           true);
       f.checkFails("substring(x'aabbcc' from 1 for -1)",
+          "Substring error: negative substring length not allowed",
+          true);
+      f.checkFails("{fn SUBSTRING('abc', 2, -1)}",
           "Substring error: negative substring length not allowed",
           true);
     }
@@ -9315,6 +9337,12 @@ public class SqlOperatorTest {
       case BIG_QUERY:
       case MYSQL:
       case ORACLE:
+        // BIG_QUERY has different implementation, check SubstrConvertlet
+        if (library == SqlLibrary.BIG_QUERY) {
+          assertReturns("abc", Integer.MIN_VALUE, "abc");
+        } else {
+          assertReturns("abc", Integer.MIN_VALUE, "");
+        }
         assertReturns("abc", -2, "bc");
         assertReturns("abc", -1, "c");
         assertReturns("abc", -2, 1, "b");
@@ -9330,6 +9358,7 @@ public class SqlOperatorTest {
         assertReturns("abc", -1, 4, "c");
         break;
       case POSTGRESQL:
+        assertReturns("abc", Integer.MIN_VALUE, "abc");
         assertReturns("abc", -2, "abc");
         assertReturns("abc", -1, "abc");
         assertReturns("abc", -2, 1, "");
@@ -10694,35 +10723,69 @@ public class SqlOperatorTest {
         "[1         , 2         , Hi        , null]", "CHAR(10) ARRAY NOT NULL");
   }
 
-  /**
-   * Test case for
-   * <a href="https://issues.apache.org/jira/browse/CALCITE-4999">[CALCITE-4999]
-   * ARRAY, MULTISET functions should return an collection of scalars
-   * if a sub-query returns 1 column</a>.
-   */
   @Test void testArrayQueryConstructor() {
     final SqlOperatorFixture f = fixture();
     f.setFor(SqlStdOperatorTable.ARRAY_QUERY, SqlOperatorFixture.VmName.EXPAND);
+
+    // Test case for [CALCITE-4999] ARRAY, MULTISET functions should
+    // return a collection of scalars if a sub-query returns 1 column
     f.checkScalar("array(select 1)", "[1]",
         "INTEGER NOT NULL ARRAY NOT NULL");
     f.check("select array(select ROW(1,2))",
         "RecordType(INTEGER NOT NULL EXPR$0, INTEGER NOT NULL EXPR$1) NOT NULL ARRAY NOT NULL",
         "[{1, 2}]");
+
+    // single sub-clause test
+    f.check("select array(select x from unnest(array[1,2,3,4]) as t(x))",
+        "INTEGER NOT NULL ARRAY NOT NULL", "[1, 2, 3, 4]");
+    f.check("select array(select x from unnest(array[1,2,3,4]) as t(x) where x > 1)",
+        "INTEGER NOT NULL ARRAY NOT NULL", "[2, 3, 4]");
+    f.check("select array(select x from unnest(array[1,2,3,4]) as t(x) limit 2)",
+        "INTEGER NOT NULL ARRAY NOT NULL", "[1, 2]");
+    f.check("select array(select x from unnest(array[1,2,3,4]) as t(x) where x > 1 limit 2)",
+        "INTEGER NOT NULL ARRAY NOT NULL", "[2, 3]");
+
+    // combined tests
+    f.check("select array(select x from unnest(array[1,2,3,4]) as t(x) "
+        + "order by x asc)", "INTEGER NOT NULL ARRAY NOT NULL", "[1, 2, 3, 4]");
+    f.check("select array(select x from unnest(array[1,2,3,4]) as t(x) "
+        + "where x > 1 order by x asc)", "INTEGER NOT NULL ARRAY NOT NULL", "[2, 3, 4]");
+    f.check("select array(select x from unnest(array[1,2,3,4]) as t(x) "
+        + "where x > 1 order by x asc limit 2)", "INTEGER NOT NULL ARRAY NOT NULL", "[2, 3]");
+    f.check("select array(select x from unnest(array[1,2,3,4]) as t(x) "
+        + "order by x desc)", "INTEGER NOT NULL ARRAY NOT NULL", "[4, 3, 2, 1]");
+    f.check("select array(select x from unnest(array[1,2,3,4]) as t(x) "
+        + "where x > 1 order by x desc)", "INTEGER NOT NULL ARRAY NOT NULL", "[4, 3, 2]");
+    f.check("select array(select x from unnest(array[1,2,3,4]) as t(x) "
+        + "where x > 1 order by x desc limit 2)", "INTEGER NOT NULL ARRAY NOT NULL", "[4, 3]");
   }
 
-  /**
-   * Test case for
-   * <a href="https://issues.apache.org/jira/browse/CALCITE-4999">[CALCITE-4999]
-   * ARRAY, MULTISET functions should return an collection of scalars
-   * if a sub-query returns 1 column</a>.
-   */
   @Test void testMultisetQueryConstructor() {
     final SqlOperatorFixture f = fixture();
+
+    // Test case for [CALCITE-4999] ARRAY, MULTISET functions should
+    // return an collection of scalars if a sub-query returns 1 column
     f.setFor(SqlStdOperatorTable.MULTISET_QUERY, SqlOperatorFixture.VmName.EXPAND);
     f.checkScalar("multiset(select 1)", "[1]", "INTEGER NOT NULL MULTISET NOT NULL");
     f.check("select multiset(select ROW(1,2))",
         "RecordType(INTEGER NOT NULL EXPR$0, INTEGER NOT NULL EXPR$1) NOT NULL MULTISET NOT NULL",
         "[{1, 2}]");
+
+    // test filter, orderby, limit
+    // multiset subquery not support orderby and limit sub-clause
+    f.check("select multiset(select x from unnest(array[1,2,3,4]) as t(x))",
+        "INTEGER NOT NULL MULTISET NOT NULL", "[1, 2, 3, 4]");
+    f.check("select multiset(select x from unnest(array[1,2,3,4]) as t(x) where x > 1)",
+        "INTEGER NOT NULL MULTISET NOT NULL", "[2, 3, 4]");
+
+    f.checkFails("select multiset(select x from unnest(array[1,2,3,4]) as t(x) ^order^ by x)",
+        "(?s).*Encountered \"order\" at .*", false);
+    f.checkFails("select multiset(select x from unnest(array[1,2,3,4]) as t(x) ^limit^ 2)",
+        "(?s).*Encountered \"limit\" at .*", false);
+    f.checkFails("select multiset(select x from unnest(array[1,2,3,4]) as t(x) "
+        + "^order^ by x limit 2)", "(?s).*Encountered \"order\" at .*", false);
+    f.checkFails("select multiset(select x from unnest(array[1,2,3,4]) as t(x) where x > 1 "
+        + "^order^ by x limit 2)", "(?s).*Encountered \"order\" at .*", false);
   }
 
   @Test void testItemOp() {
@@ -10992,6 +11055,40 @@ public class SqlOperatorTest {
         "(NULL, INTEGER NOT NULL) MAP NOT NULL");
     f.checkScalar("map(select null, null)", "{null=null}",
         "(NULL, NULL) MAP NOT NULL");
+
+    // single sub-clause test for filter/limit/orderby
+    f.check("select map(select x,y from (values(1,2),(3,4)) as t(x,y))",
+        "(INTEGER NOT NULL, INTEGER NOT NULL) MAP NOT NULL", "{1=2, 3=4}");
+    f.check("select map(select x,y from (values(1,2),(3,4)) as t(x,y) where x > 1)",
+        "(INTEGER NOT NULL, INTEGER NOT NULL) MAP NOT NULL", "{3=4}");
+    f.check("select map(select x,y from (values(1,2),(3,4),(5,6)) as t(x,y) limit 1)",
+        "(INTEGER NOT NULL, INTEGER NOT NULL) MAP NOT NULL", "{1=2}");
+    f.check("select map(select x,y from (values(1,2),(3,4),(5,6)) as t(x,y) where x > 1 limit 1)",
+        "(INTEGER NOT NULL, INTEGER NOT NULL) MAP NOT NULL", "{3=4}");
+
+    // combined tests for filter/limit/orderby
+    // note: map subquery is not sql standard, it has limitations below:
+    // case-1: use order by without limit
+    // it has no sorting effect in runtime (sort will be removed)
+    // case-2: use order by and limit
+    // the order by will take effect (sort will be reserved),
+    // but we do not guarantee the order of the final map result
+    f.check("select map(select x,y from (values(1,2),(3,4)) as t(x,y) order by x asc)",
+        "(INTEGER NOT NULL, INTEGER NOT NULL) MAP NOT NULL", "{1=2, 3=4}");
+    f.check("select map(select x,y from (values(1,2),(3,4)) as t(x,y) "
+            + "where x > 1 order by x asc)",
+        "(INTEGER NOT NULL, INTEGER NOT NULL) MAP NOT NULL", "{3=4}");
+    f.check("select map(select x,y from (values(1,2),(3,4),(5,6)) as t(x,y) "
+        + "where x > 1 order by x asc limit 1)",
+        "(INTEGER NOT NULL, INTEGER NOT NULL) MAP NOT NULL", "{3=4}");
+    f.check("select map(select x,y from (values(1,2),(3,4)) as t(x,y) order by x desc)",
+        "(INTEGER NOT NULL, INTEGER NOT NULL) MAP NOT NULL", "{1=2, 3=4}");
+    f.check("select map(select x,y from (values(1,2),(3,4)) as t(x,y) "
+            + "where x > 1 order by x desc)",
+        "(INTEGER NOT NULL, INTEGER NOT NULL) MAP NOT NULL", "{3=4}");
+    f.check("select map(select x,y from (values(1,2),(3,4),(5,6)) as t(x,y) "
+            + "where x > 1 order by x desc limit 1)",
+        "(INTEGER NOT NULL, INTEGER NOT NULL) MAP NOT NULL", "{5=6}");
   }
 
   @Test void testCeilFunc() {
@@ -13476,76 +13573,106 @@ public class SqlOperatorTest {
     f.checkAgg("logical_or(x)", values4, isNullValue());
   }
 
-  @Test void testBitAndFunc() {
+  @Test void testBitAndAggFunc() {
     final SqlOperatorFixture f = fixture();
-    f.setFor(SqlStdOperatorTable.BIT_AND, VM_FENNEL, VM_JAVA);
-    f.checkFails("bit_and(^*^)", "Unknown identifier '\\*'", false);
-    f.checkType("bit_and(1)", "INTEGER");
-    f.checkType("bit_and(CAST(2 AS TINYINT))", "TINYINT");
-    f.checkType("bit_and(CAST(2 AS SMALLINT))", "SMALLINT");
-    f.checkType("bit_and(distinct CAST(2 AS BIGINT))", "BIGINT");
-    f.checkType("bit_and(CAST(x'02' AS BINARY(1)))", "BINARY(1)");
-    f.checkFails("^bit_and(1.2)^",
-        "Cannot apply 'BIT_AND' to arguments of type 'BIT_AND\\(<DECIMAL\\(2, 1\\)>\\)'\\. Supported form\\(s\\): 'BIT_AND\\(<INTEGER>\\)'\n"
-            + "'BIT_AND\\(<BINARY>\\)'",
-        false);
-    f.checkFails("^bit_and()^",
-        "Invalid number of arguments to function 'BIT_AND'. Was expecting 1 arguments",
-        false);
-    f.checkFails("^bit_and(1, 2)^",
-        "Invalid number of arguments to function 'BIT_AND'. Was expecting 1 arguments",
-        false);
-    final String[] values = {"3", "2", "2"};
-    f.checkAgg("bit_and(x)", values, isSingle("2"));
-    final String[] binaryValues = {
-        "CAST(x'03' AS BINARY)",
-        "cast(x'02' as BINARY)",
-        "cast(x'02' AS BINARY)",
-        "cast(null AS BINARY)"};
-    f.checkAgg("bit_and(x)", binaryValues, isSingle("02"));
-    f.checkAgg("bit_and(x)", new String[]{"CAST(x'02' AS BINARY)"}, isSingle("02"));
+    f.setFor(SqlLibraryOperators.BITAND_AGG, VmName.EXPAND);
+    checkBitAnd(f, FunctionAlias.of(SqlLibraryOperators.BITAND_AGG));
   }
 
-  @Test void testBitAndFuncRuntimeFails() {
+  @Test void testBitAndFunc() {
     final SqlOperatorFixture f = fixture();
-    f.checkAggFails("bit_and(x)",
-        new String[]{"CAST(x'0201' AS VARBINARY)", "CAST(x'02' AS VARBINARY)"},
-        "Error while executing SQL .*"
-            + " Different length for bitwise operands: the first: 2, the second: 1",
-        true);
+    f.setFor(SqlStdOperatorTable.BIT_AND, VmName.EXPAND);
+    checkBitAnd(f, FunctionAlias.of(SqlStdOperatorTable.BIT_AND));
+  }
+
+  /** Tests the {@code BIT_AND} and {@code BITAND_AGG} operators. */
+  void checkBitAnd(SqlOperatorFixture f0, FunctionAlias functionAlias) {
+    final SqlFunction function = functionAlias.function;
+    final String fn = function.getName();
+    final Consumer<SqlOperatorFixture> consumer = f -> {
+      f.checkFails(fn + "(^*^)", "Unknown identifier '\\*'", false);
+      f.checkType(fn + "(1)", "INTEGER");
+      f.checkType(fn + "(CAST(2 AS TINYINT))", "TINYINT");
+      f.checkType(fn + "(CAST(2 AS SMALLINT))", "SMALLINT");
+      f.checkType(fn + "(distinct CAST(2 AS BIGINT))", "BIGINT");
+      f.checkType(fn + "(CAST(x'02' AS BINARY(1)))", "BINARY(1)");
+      f.checkFails("^" + fn + "(1.2)^",
+          "Cannot apply '" + fn + "' to arguments of type '"
+          + fn + "\\(<DECIMAL\\(2, 1\\)>\\)'\\. Supported form\\(s\\): '"
+          + fn + "\\(<INTEGER>\\)'\n"
+          + "'" + fn + "\\(<BINARY>\\)'",
+          false);
+      f.checkFails("^" + fn + "()^",
+          "Invalid number of arguments to function '" + fn + "'. Was expecting 1 arguments",
+          false);
+      f.checkFails("^" + fn + "(1, 2)^",
+          "Invalid number of arguments to function '" + fn + "'. Was expecting 1 arguments",
+          false);
+      final String[] values = {"3", "2", "2"};
+      f.checkAgg(fn + "(x)", values, isSingle("2"));
+      final String[] binaryValues = {
+          "CAST(x'03' AS BINARY)",
+          "cast(x'02' as BINARY)",
+          "cast(x'02' AS BINARY)",
+          "cast(null AS BINARY)"};
+      f.checkAgg(fn + "(x)", binaryValues, isSingle("02"));
+      f.checkAgg(fn + "(x)", new String[]{"CAST(x'02' AS BINARY)"}, isSingle("02"));
+      f.checkAggFails(fn + "(x)",
+          new String[]{"CAST(x'0201' AS VARBINARY)", "CAST(x'02' AS VARBINARY)"},
+          "Error while executing SQL .*"
+              + " Different length for bitwise operands: the first: 2, the second: 1",
+          true);
+    };
+    f0.forEachLibrary(list(functionAlias.libraries), consumer);
+  }
+
+  @Test void testBitOrAggFunc() {
+    final SqlOperatorFixture f = fixture();
+    f.setFor(SqlLibraryOperators.BITOR_AGG, VmName.EXPAND);
+    checkBitOr(f, FunctionAlias.of(SqlLibraryOperators.BITOR_AGG));
   }
 
   @Test void testBitOrFunc() {
     final SqlOperatorFixture f = fixture();
-    f.setFor(SqlStdOperatorTable.BIT_OR, VM_FENNEL, VM_JAVA);
-    f.checkFails("bit_or(^*^)", "Unknown identifier '\\*'", false);
-    f.checkType("bit_or(1)", "INTEGER");
-    f.checkType("bit_or(CAST(2 AS TINYINT))", "TINYINT");
-    f.checkType("bit_or(CAST(2 AS SMALLINT))", "SMALLINT");
-    f.checkType("bit_or(distinct CAST(2 AS BIGINT))", "BIGINT");
-    f.checkType("bit_or(CAST(x'02' AS BINARY(1)))", "BINARY(1)");
-    f.checkFails("^bit_or(1.2)^",
-        "Cannot apply 'BIT_OR' to arguments of type "
-            + "'BIT_OR\\(<DECIMAL\\(2, 1\\)>\\)'\\. Supported form\\(s\\): "
-            + "'BIT_OR\\(<INTEGER>\\)'\n"
-            + "'BIT_OR\\(<BINARY>\\)'",
-        false);
-    f.checkFails("^bit_or()^",
-        "Invalid number of arguments to function 'BIT_OR'. Was expecting 1 arguments",
-        false);
-    f.checkFails("^bit_or(1, 2)^",
-        "Invalid number of arguments to function 'BIT_OR'. Was expecting 1 arguments",
-        false);
-    final String[] values = {"1", "2", "2"};
-    f.checkAgg("bit_or(x)", values, isSingle(3));
-    final String[] binaryValues = {
-        "CAST(x'01' AS BINARY)",
-        "cast(x'02' as BINARY)",
-        "cast(x'02' AS BINARY)",
-        "cast(null AS BINARY)"};
-    f.checkAgg("bit_or(x)", binaryValues, isSingle("03"));
-    f.checkAgg("bit_or(x)", new String[]{"CAST(x'02' AS BINARY)"},
-        isSingle("02"));
+    f.setFor(SqlStdOperatorTable.BIT_OR, VmName.EXPAND);
+    checkBitOr(f, FunctionAlias.of(SqlStdOperatorTable.BIT_OR));
+  }
+
+  /** Tests the {@code BIT_OR} and {@code BITOR_AGG} operators. */
+  void checkBitOr(SqlOperatorFixture f0, FunctionAlias functionAlias) {
+    final SqlFunction function = functionAlias.function;
+    final String fn = function.getName();
+    final Consumer<SqlOperatorFixture> consumer = f -> {
+      f.checkFails(fn + "(^*^)", "Unknown identifier '\\*'", false);
+      f.checkType(fn + "(1)", "INTEGER");
+      f.checkType(fn + "(CAST(2 AS TINYINT))", "TINYINT");
+      f.checkType(fn + "(CAST(2 AS SMALLINT))", "SMALLINT");
+      f.checkType(fn + "(distinct CAST(2 AS BIGINT))", "BIGINT");
+      f.checkType(fn + "(CAST(x'02' AS BINARY(1)))", "BINARY(1)");
+      f.checkFails("^" + fn + "(1.2)^",
+          "Cannot apply '" + fn + "' to arguments of type "
+              + "'" + fn + "\\(<DECIMAL\\(2, 1\\)>\\)'\\. Supported form\\(s\\): "
+              + "'" + fn + "\\(<INTEGER>\\)'\n"
+              + "'" + fn + "\\(<BINARY>\\)'",
+          false);
+      f.checkFails("^" + fn + "()^",
+          "Invalid number of arguments to function '" + fn + "'. Was expecting 1 arguments",
+          false);
+      f.checkFails("^" + fn + "(1, 2)^",
+          "Invalid number of arguments to function '" + fn + "'. Was expecting 1 arguments",
+          false);
+      final String[] values = {"1", "2", "2"};
+      f.checkAgg("bit_or(x)", values, isSingle(3));
+      final String[] binaryValues = {
+          "CAST(x'01' AS BINARY)",
+          "cast(x'02' as BINARY)",
+          "cast(x'02' AS BINARY)",
+          "cast(null AS BINARY)"};
+      f.checkAgg(fn + "(x)", binaryValues, isSingle("03"));
+      f.checkAgg(fn + "(x)", new String[]{"CAST(x'02' AS BINARY)"},
+          isSingle("02"));
+    };
+    f0.forEachLibrary(list(functionAlias.libraries), consumer);
   }
 
   @Test void testBitXorFunc() {
@@ -13693,6 +13820,43 @@ public class SqlOperatorTest {
         }
       }
     }
+  }
+
+  /**
+   * Test cases for
+   * <a href="https://issues.apache.org/jira/browse/CALCITE-6111">[CALCITE-6111]
+   * Explicit cast from expression to numeric type doesn't check overflow</a>. */
+  @Test public void testOverflow() {
+    final SqlOperatorFixture f = fixture();
+    f.checkFails(String.format(Locale.US, "SELECT cast(%d+30 as tinyint)", Byte.MAX_VALUE),
+        OUT_OF_RANGE_MESSAGE, true);
+    f.checkFails(String.format(Locale.US, "SELECT cast(%d+30 as smallint)", Short.MAX_VALUE),
+        OUT_OF_RANGE_MESSAGE, true);
+    // We use a long value because otherwise calcite interprets the literal as an integer.
+    f.checkFails(String.format(Locale.US, "SELECT cast(%d as int)", Long.MAX_VALUE),
+        OUT_OF_RANGE_MESSAGE, true);
+
+    // Casting a floating point value larger than the maximum allowed value.
+    // 1e60 is larger than the largest BIGINT value allowed.
+    f.checkFails("SELECT cast(1e60+30 as tinyint)",
+        OUT_OF_RANGE_MESSAGE, true);
+    f.checkFails("SELECT cast(1e60+30 as smallint)",
+        OUT_OF_RANGE_MESSAGE, true);
+    f.checkFails("SELECT cast(1e60+30 as int)",
+        OUT_OF_RANGE_MESSAGE, true);
+    f.checkFails("SELECT cast(1e60+30 as bigint)",
+        ".*Overflow", true);
+
+    // Casting a decimal value larger than the maximum allowed value.
+    // Concatenating .0 to a value makes it decimal.
+    f.checkFails(String.format(Locale.US, "SELECT cast(%d.0 AS tinyint)", Short.MAX_VALUE),
+        OUT_OF_RANGE_MESSAGE, true);
+    f.checkFails(String.format(Locale.US, "SELECT cast(%d.0 AS smallint)", Integer.MAX_VALUE),
+        OUT_OF_RANGE_MESSAGE, true);
+    // Dividing Long.MAX_VALUE by 10 ensures that the resulting decimal does not exceed the
+    // maximum allowed precision for decimals but is still too large for an integer.
+    f.checkFails(String.format(Locale.US, "SELECT cast(%d.0 AS int)", Long.MAX_VALUE / 10),
+        OUT_OF_RANGE_MESSAGE, true);
   }
 
   @ParameterizedTest
