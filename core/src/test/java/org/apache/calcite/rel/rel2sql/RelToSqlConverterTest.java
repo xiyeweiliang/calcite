@@ -6376,6 +6376,31 @@ class RelToSqlConverterTest {
     sql(sql).ok(expected);
   }
 
+  /** Test case for
+   * <a href="https://issues.apache.org/jira/browse/CALCITE-6231">[CALCITE-6231]
+   * JDBC adapter generates "UNNEST" when it should generate "UNNEST ... WITH ORDINALITY" </a>.
+   */
+  @Test void testUncollectExplicitAliasWithOrd() {
+    final String sql = "select did + 1\n"
+        + "from unnest(select collect(\"department_id\") as deptid \n"
+        + "from \"department\") with ordinality as t(did, pos)";
+
+    final String expected = "SELECT \"DEPTID\" + 1\n"
+        + "FROM UNNEST (SELECT COLLECT(\"department_id\") AS \"DEPTID\"\n"
+        + "FROM \"foodmart\".\"department\") WITH ORDINALITY AS \"t0\" (\"DEPTID\", \"ORDINALITY\")";
+    sql(sql).ok(expected);
+  }
+
+  @Test void testUncollectImplicitAliasWithOrd() {
+    final String sql = "select did + 1\n"
+        + "from unnest(select collect(\"department_id\") \n"
+        + "from \"department\") with ordinality as t(did, pos)";
+
+    final String expected = "SELECT \"col_0\" + 1\n"
+        + "FROM UNNEST (SELECT COLLECT(\"department_id\")\n"
+        + "FROM \"foodmart\".\"department\") WITH ORDINALITY AS \"t0\" (\"col_0\", \"ORDINALITY\")";
+    sql(sql).ok(expected);
+  }
 
   @Test void testWithinGroup1() {
     final String query = "select \"product_class_id\", collect(\"net_weight\") "
@@ -7849,6 +7874,23 @@ class RelToSqlConverterTest {
     sql(query)
         .withPresto().ok(expected)
         .withSpark().ok(sparkExpected);
+  }
+
+  /** Test case for
+   * <a href="https://issues.apache.org/jira/browse/CALCITE-6258">[CALCITE-6258]
+   * Map value constructor is unparsed incorrectly for PrestoSqlDialect</a>.*/
+  @Test void testMapValueConstructor() {
+    final String query = "SELECT MAP['k1', 'v1', 'k2', 'v2']";
+    final String expectedPresto = "SELECT MAP (ARRAY['k1', 'k2'], ARRAY['v1', 'v2'])\n"
+        + "FROM (VALUES (0)) AS \"t\" (\"ZERO\")";
+    sql(query).withPresto().ok(expectedPresto);
+  }
+
+  @Test void testMapValueConstructorWithArray() {
+    final String query = "SELECT MAP[ARRAY['k1', 'k2'], ARRAY['v1', 'v2']]";
+    final String expectedPresto = "SELECT MAP (ARRAY['k1', 'k2'], ARRAY['v1', 'v2'])\n"
+        + "FROM (VALUES (0)) AS \"t\" (\"ZERO\")";
+    sql(query).withPresto().ok(expectedPresto);
   }
 
   /** Fluid interface to run tests. */
