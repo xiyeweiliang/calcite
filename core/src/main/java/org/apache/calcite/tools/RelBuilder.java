@@ -118,7 +118,6 @@ import org.apache.calcite.util.Util;
 import org.apache.calcite.util.mapping.Mapping;
 import org.apache.calcite.util.mapping.Mappings;
 
-import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
@@ -155,6 +154,7 @@ import java.util.function.Function;
 import java.util.function.UnaryOperator;
 import java.util.stream.Collectors;
 
+import static com.google.common.base.Preconditions.checkArgument;
 import static com.google.common.collect.ImmutableList.toImmutableList;
 
 import static org.apache.calcite.linq4j.Nullness.castNonNull;
@@ -2270,7 +2270,7 @@ public class RelBuilder {
    */
   public RelBuilder rename(List<? extends @Nullable String> fieldNames) {
     final List<String> oldFieldNames = peek().getRowType().getFieldNames();
-    Preconditions.checkArgument(fieldNames.size() <= oldFieldNames.size(),
+    checkArgument(fieldNames.size() <= oldFieldNames.size(),
         "More names than fields");
     final List<String> newFieldNames = new ArrayList<>(oldFieldNames);
     for (int i = 0; i < fieldNames.size(); i++) {
@@ -2442,9 +2442,22 @@ public class RelBuilder {
       assert groupSet.contains(set);
     }
 
-    PairList<ImmutableSet<String>, RelDataTypeField> inFields = frame.fields;
-    final ImmutableBitSet groupSet2;
-    final ImmutableList<ImmutableBitSet> groupSets2;
+    return pruneAggregateInputFieldsAndDeduplicateAggCalls(r, groupSet, groupSets, aggregateCalls,
+        frame.fields, registrar.extraNodes);
+  }
+
+  /**
+   * Prunes unused fields on the input of the aggregate and removes duplicate aggregation calls.
+   */
+  private RelBuilder pruneAggregateInputFieldsAndDeduplicateAggCalls(
+      RelNode r,
+      final ImmutableBitSet groupSet,
+      final ImmutableList<ImmutableBitSet> groupSets,
+      final List<AggregateCall> aggregateCalls,
+      PairList<ImmutableSet<String>, RelDataTypeField> inFields,
+      final List<RexNode> extraNodes) {
+    final ImmutableBitSet groupSetAfterPruning;
+    final ImmutableList<ImmutableBitSet> groupSetsAfterPruning;
     if (config.pruneInputOfAggregate()
         && r instanceof Project) {
       final Set<Integer> fieldsUsed =
@@ -2453,22 +2466,22 @@ public class RelBuilder {
       // pretend that one field is used.
       if (fieldsUsed.isEmpty()) {
         r = ((Project) r).getInput();
-        groupSet2 = groupSet;
-        groupSets2 = groupSets;
+        groupSetAfterPruning = groupSet;
+        groupSetsAfterPruning = groupSets;
       } else if (fieldsUsed.size() < r.getRowType().getFieldCount()) {
         // Some fields are computed but not used. Prune them.
-        final Map<Integer, Integer> map = new HashMap<>();
+        final Map<Integer, Integer> sourceFieldToTargetFieldMap = new HashMap<>();
         for (int source : fieldsUsed) {
-          map.put(source, map.size());
+          sourceFieldToTargetFieldMap.put(source, sourceFieldToTargetFieldMap.size());
         }
 
-        groupSet2 = groupSet.permute(map);
-        groupSets2 =
+        groupSetAfterPruning = groupSet.permute(sourceFieldToTargetFieldMap);
+        groupSetsAfterPruning =
             ImmutableBitSet.ORDERING.immutableSortedCopy(
-                ImmutableBitSet.permute(groupSets, map));
+                ImmutableBitSet.permute(groupSets, sourceFieldToTargetFieldMap));
 
         final Mappings.TargetMapping targetMapping =
-            Mappings.target(map, r.getRowType().getFieldCount(),
+            Mappings.target(sourceFieldToTargetFieldMap, r.getRowType().getFieldCount(),
                 fieldsUsed.size());
         final List<AggregateCall> oldAggregateCalls =
             new ArrayList<>(aggregateCalls);
@@ -2493,24 +2506,24 @@ public class RelBuilder {
             project.copy(cluster.traitSet(), project.getInput(), newProjects,
                 builder.build());
       } else {
-        groupSet2 = groupSet;
-        groupSets2 = groupSets;
+        groupSetAfterPruning = groupSet;
+        groupSetsAfterPruning = groupSets;
       }
     } else {
-      groupSet2 = groupSet;
-      groupSets2 = groupSets;
+      groupSetAfterPruning = groupSet;
+      groupSetsAfterPruning = groupSets;
     }
 
     if (!config.dedupAggregateCalls() || Util.isDistinct(aggregateCalls)) {
-      return aggregate_(groupSet2, groupSets2, r, aggregateCalls,
-          registrar.extraNodes, inFields);
+      return aggregate_(groupSetAfterPruning, groupSetsAfterPruning, r, aggregateCalls,
+          extraNodes, inFields);
     }
 
     // There are duplicate aggregate calls. Rebuild the list to eliminate
     // duplicates, then add a Project.
     final Set<AggregateCall> callSet = new HashSet<>();
     final PairList<Integer, @Nullable String> projects = PairList.of();
-    Util.range(groupSet.cardinality())
+    Util.range(groupSetAfterPruning.cardinality())
         .forEach(i -> projects.add(i, null));
     final List<AggregateCall> distinctAggregateCalls = new ArrayList<>();
     for (AggregateCall aggregateCall : aggregateCalls) {
@@ -2522,10 +2535,10 @@ public class RelBuilder {
         i = distinctAggregateCalls.indexOf(aggregateCall);
         assert i >= 0;
       }
-      projects.add(groupSet.cardinality() + i, aggregateCall.name);
+      projects.add(groupSetAfterPruning.cardinality() + i, aggregateCall.name);
     }
-    aggregate_(groupSet, groupSets, r, distinctAggregateCalls,
-        registrar.extraNodes, inFields);
+    aggregate_(groupSetAfterPruning, groupSetsAfterPruning, r, distinctAggregateCalls,
+        extraNodes, inFields);
     return project(projects.transform((i, name) -> aliasMaybe(field(i), name)));
   }
 

@@ -4421,31 +4421,40 @@ public class SqlOperatorTest {
     f.setFor(SqlLibraryOperators.TO_CHAR);
     f.checkString("to_char(timestamp '2022-06-03 12:15:48.678', 'YYYY-MM-DD HH24:MI:SS.MS TZ')",
         "2022-06-03 12:15:48.678",
-        "VARCHAR(2000) NOT NULL");
+        "VARCHAR NOT NULL");
     f.checkString("to_char(timestamp '2022-06-03 12:15:48.678', 'Day')",
         "Friday",
-        "VARCHAR(2000) NOT NULL");
+        "VARCHAR NOT NULL");
+    f.checkString("to_char(timestamp '0001-01-01 00:00:00.000', 'Day')",
+        "Monday",
+        "VARCHAR NOT NULL");
+    f.checkString("to_char(timestamp '2022-06-03 12:15:48.678', 'DY')",
+        "Fri",
+        "VARCHAR NOT NULL");
+    f.checkString("to_char(timestamp '0001-01-01 00:00:00.000', 'DY')",
+        "Mon",
+        "VARCHAR NOT NULL");
     f.checkString("to_char(timestamp '2022-06-03 12:15:48.678', 'CC')",
         "21",
-        "VARCHAR(2000) NOT NULL");
+        "VARCHAR NOT NULL");
     f.checkString("to_char(timestamp '2022-06-03 13:15:48.678', 'HH12')",
         "01",
-        "VARCHAR(2000) NOT NULL");
+        "VARCHAR NOT NULL");
     f.checkString("to_char(timestamp '2022-06-03 13:15:48.678', 'HH24')",
         "13",
-        "VARCHAR(2000) NOT NULL");
+        "VARCHAR NOT NULL");
     f.checkString("to_char(timestamp '2022-06-03 13:15:48.678', 'MI')",
         "15",
-        "VARCHAR(2000) NOT NULL");
+        "VARCHAR NOT NULL");
     f.checkString("to_char(timestamp '2022-06-03 13:15:48.678', 'MS')",
         "678",
-        "VARCHAR(2000) NOT NULL");
+        "VARCHAR NOT NULL");
     f.checkString("to_char(timestamp '2022-06-03 13:15:48.678', 'Q')",
         "2",
-        "VARCHAR(2000) NOT NULL");
+        "VARCHAR NOT NULL");
     f.checkString("to_char(timestamp '2022-06-03 13:15:48.678', 'IW')",
         "23",
-        "VARCHAR(2000) NOT NULL");
+        "VARCHAR NOT NULL");
     f.checkNull("to_char(timestamp '2022-06-03 12:15:48.678', NULL)");
     f.checkNull("to_char(cast(NULL as timestamp), NULL)");
     f.checkNull("to_char(cast(NULL as timestamp), 'Day')");
@@ -6234,6 +6243,43 @@ public class SqlOperatorTest {
     f.checkNull("log(10, cast(null as real))");
   }
 
+  /** Test case for
+   * <a href="https://issues.apache.org/jira/browse/CALCITE-6224">[CALCITE-6224]
+   * Add LOG2 function (enabled in MYSQL, Spark library)</a>. */
+  @Test void testLog2Func() {
+    final SqlOperatorFixture f0 = fixture();
+    f0.checkFails("^log2(4)^",
+        "No match found for function signature LOG2\\(<NUMERIC>\\)", false);
+    f0.setFor(SqlLibraryOperators.LOG2);
+    final Consumer<SqlOperatorFixture> consumer = f -> {
+      f.checkScalarApprox("log2(2)", "DOUBLE",
+          isWithin(1.0, 0.000001));
+      f.checkScalarApprox("log2(4)", "DOUBLE",
+          isWithin(2.0, 0.000001));
+      f.checkScalarApprox("log2(65536)", "DOUBLE",
+          isWithin(16.0, 0.000001));
+      f.checkScalarApprox("log2(2.0/3)", "DOUBLE",
+          isWithin(-0.5849625007211561, 0.000001));
+      f.checkScalarApprox("log2(4.0/3)", "DOUBLE",
+          isWithin(0.4150374992788435, 0.000001));
+      f.checkScalarApprox("log2(0.5)", "DOUBLE",
+          isWithin(-1.0, 0.000001));
+      f.checkScalarApprox("log2(cast(10e8 as double))", "DOUBLE",
+          isWithin(29.897352853986263, 0.000001));
+      f.checkScalarApprox("log2(cast(10e8 as float))", "DOUBLE",
+          isWithin(29.897352853986263, 0.000001));
+      f.checkScalarApprox("log2(1e+52)", "DOUBLE",
+          isWithin(172.74026093414284, 0.000001));
+      f.checkNull("log2(0)");
+      f.checkNull("log2(-2)");
+      f.checkNull("log2(+0.0)");
+      f.checkNull("log2(-0.0)");
+      f.checkNull("log2(null)");
+      f.checkNull("log2(cast(null as real))");
+    };
+    f0.forEachLibrary(list(SqlLibrary.MYSQL, SqlLibrary.SPARK), consumer);
+  }
+
   @Test void testRandFunc() {
     final SqlOperatorFixture f = fixture();
     f.setFor(SqlStdOperatorTable.RAND, VmName.EXPAND);
@@ -8005,7 +8051,7 @@ public class SqlOperatorTest {
   @Test void testTruncFail() {
     SqlOperatorFixture f = fixture();
     f = f.setFor(SqlStdOperatorTable.TRUNCATE, VmName.EXPAND)
-        .setFor(SqlLibraryOperators.TRUNC)
+        .setFor(SqlLibraryOperators.TRUNC_BIG_QUERY)
         .withLibrary(SqlLibrary.BIG_QUERY);
     f.checkFails("^truncate(42, CAST(2 as BIGINT))^",
         "Cannot apply 'TRUNCATE' to arguments of type 'TRUNCATE\\(<INTEGER>, <BIGINT>\\)'\\. "
@@ -8144,12 +8190,12 @@ public class SqlOperatorTest {
 
   @Test void testTruncFunc() {
     final SqlOperatorFixture f = fixture()
-        .setFor(SqlLibraryOperators.TRUNC)
+        .setFor(SqlLibraryOperators.TRUNC_BIG_QUERY)
         .withLibrary(SqlLibrary.BIG_QUERY);
-    f.checkType("trunc(42, -1)", "INTEGER NOT NULL");
+    f.checkType("trunc(42, -1)", "DOUBLE NOT NULL");
     f.checkType("trunc(cast(42 as float), 1)", "FLOAT NOT NULL");
     f.checkType("trunc(case when false then 42 else null end, -1)",
-        "INTEGER");
+        "DOUBLE");
     f.enableTypeCoercion(false)
         .checkFails("^trunc('abc', 'def')^",
             "Cannot apply 'TRUNC' to arguments of type 'TRUNC\\(<CHAR\\(3\\)>, <CHAR\\(3\\)>\\)'\\."
@@ -8157,7 +8203,7 @@ public class SqlOperatorTest {
                 + "TRUNC\\(<NUMERIC>, <INTEGER>\\)",
             false);
     f.checkType("trunc('abc', 'def')", "DECIMAL(19, 9) NOT NULL");
-    f.checkScalar("trunc(42, -1)", 40, "INTEGER NOT NULL");
+    f.checkScalar("trunc(42, -1)", 40.0, "DOUBLE NOT NULL");
     f.checkScalar("trunc(cast(42.345 as decimal(2, 3)), 2)",
         BigDecimal.valueOf(4234, 2), "DECIMAL(2, 3) NOT NULL");
     f.checkScalar("trunc(cast(-42.345 as decimal(2, 3)), 2)",
@@ -8166,7 +8212,7 @@ public class SqlOperatorTest {
     f.checkNull("trunc(cast(null as double), 1)");
     f.checkNull("trunc(43.21, cast(null as integer))");
 
-    f.checkScalar("trunc(42)", 42, "INTEGER NOT NULL");
+    f.checkScalar("trunc(42)", 42.0, "DOUBLE NOT NULL");
     f.checkScalar("trunc(42.324)",
         BigDecimal.valueOf(42, 0), "DECIMAL(5, 3) NOT NULL");
     f.checkScalar("trunc(cast(42.324 as float))", 42F,
@@ -11261,14 +11307,14 @@ public class SqlOperatorTest {
     f0.checkType("ceil(cast(3 as tinyint))", "TINYINT NOT NULL");
     final SqlOperatorFixture f = f0.setFor(SqlLibraryOperators.FLOOR_BIG_QUERY)
         .withLibrary(SqlLibrary.BIG_QUERY).withConformance(SqlConformanceEnum.BIG_QUERY);
-    f.checkScalarExact("ceil(cast(3 as tinyint))", "DOUBLE", "3.0");
-    f.checkScalarExact("ceil(cast(3 as smallint))", "DOUBLE", "3.0");
-    f.checkScalarExact("ceil(cast(3 as integer))", "DOUBLE", "3.0");
-    f.checkScalarExact("ceil(cast(3 as bigint))", "DOUBLE", "3.0");
-    f.checkScalarExact("ceil(cast(3.5 as double))", "DOUBLE", "4.0");
+    f.checkScalarExact("ceil(cast(3 as tinyint))", "DOUBLE NOT NULL", "3.0");
+    f.checkScalarExact("ceil(cast(3 as smallint))", "DOUBLE NOT NULL", "3.0");
+    f.checkScalarExact("ceil(cast(3 as integer))", "DOUBLE NOT NULL", "3.0");
+    f.checkScalarExact("ceil(cast(3 as bigint))", "DOUBLE NOT NULL", "3.0");
+    f.checkScalarExact("ceil(cast(3.5 as double))", "DOUBLE NOT NULL", "4.0");
     f.checkScalarExact("ceil(cast(3.45 as decimal))",
-        "DECIMAL(19, 0)", "4");
-    f.checkScalarExact("ceil(cast(3.45 as float))", "FLOAT", "4.0");
+        "DECIMAL(19, 0) NOT NULL", "4");
+    f.checkScalarExact("ceil(cast(3.45 as float))", "FLOAT NOT NULL", "4.0");
     f.checkNull("ceil(cast(null as tinyint))");
   }
 
@@ -11277,14 +11323,14 @@ public class SqlOperatorTest {
     f0.checkType("floor(cast(3 as tinyint))", "TINYINT NOT NULL");
     final SqlOperatorFixture f = f0.setFor(SqlLibraryOperators.FLOOR_BIG_QUERY)
         .withLibrary(SqlLibrary.BIG_QUERY).withConformance(SqlConformanceEnum.BIG_QUERY);
-    f.checkScalarExact("floor(cast(3 as tinyint))", "DOUBLE", "3.0");
-    f.checkScalarExact("floor(cast(3 as smallint))", "DOUBLE", "3.0");
-    f.checkScalarExact("floor(cast(3 as integer))", "DOUBLE", "3.0");
-    f.checkScalarExact("floor(cast(3 as bigint))", "DOUBLE", "3.0");
-    f.checkScalarExact("floor(cast(3.5 as double))", "DOUBLE", "3.0");
+    f.checkScalarExact("floor(cast(3 as tinyint))", "DOUBLE NOT NULL", "3.0");
+    f.checkScalarExact("floor(cast(3 as smallint))", "DOUBLE NOT NULL", "3.0");
+    f.checkScalarExact("floor(cast(3 as integer))", "DOUBLE NOT NULL", "3.0");
+    f.checkScalarExact("floor(cast(3 as bigint))", "DOUBLE NOT NULL", "3.0");
+    f.checkScalarExact("floor(cast(3.5 as double))", "DOUBLE NOT NULL", "3.0");
     f.checkScalarExact("floor(cast(3.45 as decimal))",
-        "DECIMAL(19, 0)", "3");
-    f.checkScalarExact("floor(cast(3.45 as float))", "FLOAT", "3.0");
+        "DECIMAL(19, 0) NOT NULL", "3");
+    f.checkScalarExact("floor(cast(3.45 as float))", "FLOAT NOT NULL", "3.0");
     f.checkNull("floor(cast(null as tinyint))");
   }
 
@@ -12628,19 +12674,28 @@ public class SqlOperatorTest {
         false);
     f.checkScalar("FORMAT_TIME('%H', TIME '12:34:33')",
         "12",
-        "VARCHAR(2000) NOT NULL");
+        "VARCHAR NOT NULL");
     f.checkScalar("FORMAT_TIME('%R', TIME '12:34:33')",
         "12:34",
-        "VARCHAR(2000) NOT NULL");
+        "VARCHAR NOT NULL");
     f.checkScalar("FORMAT_TIME('The time is %M-%S', TIME '12:34:33')",
         "The time is 34-33",
-        "VARCHAR(2000) NOT NULL");
+        "VARCHAR NOT NULL");
   }
 
   @Test void testFormatDate() {
     final SqlOperatorFixture f = fixture()
         .withLibrary(SqlLibrary.BIG_QUERY)
         .setFor(SqlLibraryOperators.FORMAT_DATE);
+    // Test case for [CALCITE-6252] https://issues.apache.org/jira/browse/CALCITE-6252
+    // BigQuery FORMAT_DATE uses the wrong calendar for Julian dates
+    f.checkScalar("FORMAT_DATE('%A %a %d %B %Y', '0001-01-01')",
+        "Monday Mon 01 January 1",
+        "VARCHAR NOT NULL");
+    f.checkScalar("FORMAT_DATE('%A %a %d %B %Y', '2024-02-08')",
+        "Thursday Thu 08 February 2024",
+        "VARCHAR NOT NULL");
+
     f.checkFails("^FORMAT_DATE('%x', 123)^",
         "Cannot apply 'FORMAT_DATE' to arguments of type "
             + "'FORMAT_DATE\\(<CHAR\\(2\\)>, <INTEGER>\\)'\\. "
@@ -12650,24 +12705,24 @@ public class SqlOperatorTest {
     // Can implicitly cast TIMESTAMP to DATE
     f.checkScalar("FORMAT_DATE('%x', timestamp '2008-12-25 15:30:00')",
         "12/25/08",
-        "VARCHAR(2000) NOT NULL");
+        "VARCHAR NOT NULL");
     f.checkScalar("FORMAT_DATE('%b-%d-%Y', DATE '2008-12-25')",
         "Dec-25-2008",
-        "VARCHAR(2000) NOT NULL");
+        "VARCHAR NOT NULL");
     f.checkScalar("FORMAT_DATE('%b %Y', DATE '2008-12-25')",
         "Dec 2008",
-        "VARCHAR(2000) NOT NULL");
+        "VARCHAR NOT NULL");
     // Test case for [CALCITE-6247] https://issues.apache.org/jira/browse/CALCITE-6247
     // BigQuery FORMAT_DATE function handles incorrectly the %e format specifier
     f.checkScalar("FORMAT_DATE('*%e*', DATE '2008-12-02')",
         "* 2*",
-        "VARCHAR(2000) NOT NULL");
+        "VARCHAR NOT NULL");
     f.checkScalar("FORMAT_DATE('%x', DATE '2008-12-25')",
         "12/25/08",
-        "VARCHAR(2000) NOT NULL");
+        "VARCHAR NOT NULL");
     f.checkScalar("FORMAT_DATE('The date is: %x', DATE '2008-12-25')",
         "The date is: 12/25/08",
-        "VARCHAR(2000) NOT NULL");
+        "VARCHAR NOT NULL");
     f.checkNull("FORMAT_DATE('%x', CAST(NULL AS DATE))");
     f.checkNull("FORMAT_DATE('%b-%d-%Y', CAST(NULL AS DATE))");
     f.checkNull("FORMAT_DATE('%b %Y', CAST(NULL AS DATE))");

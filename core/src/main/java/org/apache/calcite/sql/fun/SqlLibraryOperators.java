@@ -456,7 +456,7 @@ public abstract class SqlLibraryOperators {
       .withName("CEIL_BIG_QUERY")
       .withReturnTypeInference(ReturnTypes.ARG0_EXCEPT_INTEGER_NULLABLE);
 
-  /** The "FLOOR(value)" function. Identical to the stadnard <code>FLOOR</code> function
+  /** The "FLOOR(value)" function. Identical to the standard <code>FLOOR</code> function
    * except the return type should be a double if the operand is an integer. */
   @LibraryOperator(libraries = {BIG_QUERY})
   public static final SqlFunction FLOOR_BIG_QUERY = new SqlFloorFunction(SqlKind.FLOOR)
@@ -1597,7 +1597,7 @@ public abstract class SqlLibraryOperators {
   @LibraryOperator(libraries = {MYSQL, ORACLE, POSTGRESQL})
   public static final SqlFunction TO_CHAR =
       SqlBasicFunction.create("TO_CHAR",
-          ReturnTypes.VARCHAR_2000,
+          ReturnTypes.VARCHAR,
           OperandTypes.TIMESTAMP_STRING,
           SqlFunctionCategory.TIMEDATE);
 
@@ -1666,14 +1666,14 @@ public abstract class SqlLibraryOperators {
    * Formats a time object according to the specified string. */
   @LibraryOperator(libraries = {BIG_QUERY})
   public static final SqlFunction FORMAT_TIME =
-      SqlBasicFunction.create("FORMAT_TIME", ReturnTypes.VARCHAR_2000_NULLABLE,
+      SqlBasicFunction.create("FORMAT_TIME", ReturnTypes.VARCHAR_NULLABLE,
           OperandTypes.CHARACTER_TIME, SqlFunctionCategory.STRING);
 
   /** The "FORMAT_DATE(string, date)" function (BigQuery);
    * Formats a date object according to the specified string. */
   @LibraryOperator(libraries = {BIG_QUERY})
   public static final SqlFunction FORMAT_DATE =
-      SqlBasicFunction.create("FORMAT_DATE", ReturnTypes.VARCHAR_2000_NULLABLE,
+      SqlBasicFunction.create("FORMAT_DATE", ReturnTypes.VARCHAR_NULLABLE,
           OperandTypes.CHARACTER_DATE, SqlFunctionCategory.STRING);
 
   /** The "FORMAT_TIMESTAMP(string, timestamp)" function (BigQuery);
@@ -2149,13 +2149,24 @@ public abstract class SqlLibraryOperators {
           OperandTypes.NUMERIC_OPTIONAL_NUMERIC,
           SqlFunctionCategory.NUMERIC);
 
+  /** The "LOG2(numeric)" function. Returns the base 2 logarithm of numeric. */
+  @LibraryOperator(libraries = {MYSQL, SPARK})
+  public static final SqlFunction LOG2 =
+      SqlBasicFunction.create("LOG2",
+          ReturnTypes.DOUBLE_FORCE_NULLABLE,
+          OperandTypes.NUMERIC,
+          SqlFunctionCategory.NUMERIC);
+
   @LibraryOperator(libraries = {BIG_QUERY, SPARK})
   public static final SqlFunction POW =
       SqlStdOperatorTable.POWER.withName("POW");
 
+  /** The "TRUNC(numeric1 [, integer2])" function. Identical to the standard <code>TRUNCATE</code>
+  * function except the return type should be a double if numeric1 is an integer. */
   @LibraryOperator(libraries = {BIG_QUERY})
-  public static final SqlFunction TRUNC =
-      SqlStdOperatorTable.TRUNCATE.withName("TRUNC");
+  public static final SqlFunction TRUNC_BIG_QUERY = SqlStdOperatorTable.TRUNCATE
+          .withName("TRUNC")
+          .withReturnTypeInference(ReturnTypes.ARG0_EXCEPT_INTEGER_NULLABLE);
 
   /** Infix "::" cast operator used by PostgreSQL, for example
    * {@code '100'::INTEGER}. */

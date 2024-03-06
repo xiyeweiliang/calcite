@@ -208,6 +208,7 @@ import static org.apache.calcite.sql.fun.SqlLibraryOperators.JSON_TYPE;
 import static org.apache.calcite.sql.fun.SqlLibraryOperators.LEFT;
 import static org.apache.calcite.sql.fun.SqlLibraryOperators.LEVENSHTEIN;
 import static org.apache.calcite.sql.fun.SqlLibraryOperators.LOG;
+import static org.apache.calcite.sql.fun.SqlLibraryOperators.LOG2;
 import static org.apache.calcite.sql.fun.SqlLibraryOperators.LOGICAL_AND;
 import static org.apache.calcite.sql.fun.SqlLibraryOperators.LOGICAL_OR;
 import static org.apache.calcite.sql.fun.SqlLibraryOperators.LPAD;
@@ -277,7 +278,7 @@ import static org.apache.calcite.sql.fun.SqlLibraryOperators.TO_CHAR;
 import static org.apache.calcite.sql.fun.SqlLibraryOperators.TO_CODE_POINTS;
 import static org.apache.calcite.sql.fun.SqlLibraryOperators.TO_HEX;
 import static org.apache.calcite.sql.fun.SqlLibraryOperators.TRANSLATE3;
-import static org.apache.calcite.sql.fun.SqlLibraryOperators.TRUNC;
+import static org.apache.calcite.sql.fun.SqlLibraryOperators.TRUNC_BIG_QUERY;
 import static org.apache.calcite.sql.fun.SqlLibraryOperators.TRY_CAST;
 import static org.apache.calcite.sql.fun.SqlLibraryOperators.UNIX_DATE;
 import static org.apache.calcite.sql.fun.SqlLibraryOperators.UNIX_MICROS;
@@ -637,6 +638,7 @@ public class RexImpTable {
       defineMethod(EXP, BuiltInMethod.EXP.method, NullPolicy.STRICT);
       defineMethod(POWER, BuiltInMethod.POWER.method, NullPolicy.STRICT);
       defineMethod(ABS, BuiltInMethod.ABS.method, NullPolicy.STRICT);
+      defineMethod(LOG2, BuiltInMethod.LOG2.method, NullPolicy.STRICT);
 
       map.put(LN, new LogImplementor());
       map.put(LOG, new LogImplementor());
@@ -675,7 +677,7 @@ public class RexImpTable {
       defineMethod(SINH, BuiltInMethod.SINH.method, NullPolicy.STRICT);
       defineMethod(TAN, BuiltInMethod.TAN.method, NullPolicy.STRICT);
       defineMethod(TANH, BuiltInMethod.TANH.method, NullPolicy.STRICT);
-      defineMethod(TRUNC, BuiltInMethod.STRUNCATE.method, NullPolicy.STRICT);
+      defineMethod(TRUNC_BIG_QUERY, BuiltInMethod.STRUNCATE.method, NullPolicy.STRICT);
       defineMethod(TRUNCATE, BuiltInMethod.STRUNCATE.method, NullPolicy.STRICT);
 
       map.put(SAFE_ADD,
