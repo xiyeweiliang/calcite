@@ -3570,29 +3570,81 @@ public class SqlOperatorTest {
   }
 
   @Test void testRlikeOperator() {
-    SqlOperatorFixture f = fixture()
-        .setFor(SqlLibraryOperators.RLIKE, VM_EXPAND);
-    checkRlike(f.withLibrary(SqlLibrary.SPARK));
-    checkRlike(f.withLibrary(SqlLibrary.HIVE));
+    final SqlOperatorFixture f = fixture().setFor(SqlLibraryOperators.RLIKE, VM_EXPAND);
+    checkRlikeFunc(f, SqlLibrary.HIVE, SqlLibraryOperators.RLIKE);
+    checkRlikeFunc(f, SqlLibrary.SPARK, SqlLibraryOperators.RLIKE);
+    checkRlikeFunc(f, SqlLibrary.SPARK, SqlLibraryOperators.REGEXP);
+    checkRlikeFunc(f, SqlLibrary.SPARK, SqlLibraryOperators.REGEXP_LIKE);
+    checkNotRlikeFunc(f.withLibrary(SqlLibrary.HIVE));
+    checkNotRlikeFunc(f.withLibrary(SqlLibrary.SPARK));
     checkRlikeFails(f.withLibrary(SqlLibrary.MYSQL));
     checkRlikeFails(f.withLibrary(SqlLibrary.ORACLE));
   }
 
-  static void checkRlike(SqlOperatorFixture f) {
-    f.checkBoolean("'Merrisa@gmail.com' rlike '.+@*\\.com'", true);
-    f.checkBoolean("'Merrisa@gmail.com' rlike '.com$'", true);
-    f.checkBoolean("'acbd' rlike '^ac+'", true);
-    f.checkBoolean("'acb' rlike 'acb|efg'", true);
-    f.checkBoolean("'acb|efg' rlike 'acb\\|efg'", true);
-    f.checkBoolean("'Acbd' rlike '^ac+'", false);
-    f.checkBoolean("'Merrisa@gmail.com' rlike 'Merrisa_'", false);
-    f.checkBoolean("'abcdef' rlike '%cd%'", false);
+  void checkRlikeFunc(SqlOperatorFixture f0, SqlLibrary library, SqlOperator operator) {
+    final Consumer<SqlOperatorFixture> consumer = f -> {
+      f.checkBoolean(binaryExpression(operator, "'Merrisa@gmail.com'", "'.+@*\\.com'"), true);
+      f.checkBoolean(binaryExpression(operator, "'Merrisa@gmail.com'", "'.com$'"), true);
+      f.checkBoolean(binaryExpression(operator, "'acbd'", "'^ac+'"), true);
+      f.checkBoolean(binaryExpression(operator, "'acb'", "'acb|efg'"), true);
+      f.checkBoolean(binaryExpression(operator, "'acb|efg'", "'acb\\|efg'"), true);
+      f.checkBoolean(binaryExpression(operator, "'Acbd'", "'^ac+'"), false);
+      f.checkBoolean(binaryExpression(operator, "'Merrisa@gmail.com'", "'Merrisa_'"), false);
+      f.checkBoolean(binaryExpression(operator, "'abcdef'", "'%cd%'"), false);
+      f.checkBoolean(binaryExpression(operator, "'abc def ghi'", "'abc'"), true);
+      f.checkBoolean(binaryExpression(operator, "'abc def ghi'", "'[a-z]+'"), true);
+      f.checkBoolean(
+          binaryExpression(operator, "'foo@bar.com'",
+          "'@[a-zA-Z0-9-]+\\.[a-zA-Z0-9.]+'"), true);
+      f.checkBoolean(
+          binaryExpression(operator, "'foo@.com'",
+          "'@[a-zA-Z0-9-]+\\.[a-zA-Z0-9.]+'"), false);
+      f.checkBoolean(binaryExpression(operator, "'5556664422'", "'^\\d{10}$'"), true);
+      f.checkBoolean(binaryExpression(operator, "'11555666442233'", "'^\\d{10}$'"), false);
+      f.checkBoolean(binaryExpression(operator, "'55566644221133'", "'\\d{10}'"), true);
+      f.checkBoolean(binaryExpression(operator, "'55as56664as422'", "'\\d{10}'"), false);
+      f.checkBoolean(binaryExpression(operator, "'55as56664as422'", "''"), true);
 
+      // test for string escaped
+      f.checkBoolean(binaryExpression(operator, "'abc'", "'^\\abc$'"), false);
+      f.checkBoolean(
+          binaryExpression(operator, "'%SystemDrive%\\Users\\John'",
+              "'%SystemDrive%\\\\Users.*'"), true);
+      f.checkBoolean(
+          binaryExpression(operator, "'%SystemDrive%\\\\Users\\\\John'",
+          "'%SystemDrive%\\\\\\\\Users.*'"), true);
+      f.checkFails(
+          binaryExpression(operator, "'%SystemDrive%\\Users\\John'",
+          "'%SystemDrive%\\Users.*'"),
+          "(?s).*Illegal/unsupported escape sequence near index.*", true);
+
+      f.checkQuery("select " + binaryExpression(operator, "'abc def ghi'", "'abc'"));
+      f.checkQuery(
+          "select " + binaryExpression(operator, "'foo@bar.com'",
+          "'@[a-zA-Z0-9-]+\\\\.[a-zA-Z0-9-.]+'"));
+      f.checkQuery("select " + binaryExpression(operator, "'55as56664as422'", "'\\d{10}'"));
+
+      f.checkNull(binaryExpression(operator, "'abc def ghi'", "cast(null as varchar)"));
+      f.checkNull(binaryExpression(operator, "cast(null as varchar)", "'abc'"));
+      f.checkNull(binaryExpression(operator, "cast(null as varchar)", "cast(null as varchar)"));
+    };
+    f0.forEachLibrary(list(library), consumer);
+  }
+
+  void checkNotRlikeFunc(SqlOperatorFixture f) {
     f.setFor(SqlLibraryOperators.NOT_RLIKE, VM_EXPAND);
     f.checkBoolean("'Merrisagmail' not rlike '.+@*\\.com'", true);
     f.checkBoolean("'acbd' not rlike '^ac+'", false);
     f.checkBoolean("'acb|efg' not rlike 'acb\\|efg'", false);
     f.checkBoolean("'Merrisa@gmail.com' not rlike 'Merrisa_'", true);
+  }
+
+  private String binaryExpression(SqlOperator operator, String left, String right) {
+    if (SqlLibraryOperators.RLIKE == operator || SqlLibraryOperators.NOT_RLIKE == operator) {
+      return left + " " + operator.getName() + " " + right;
+    } else {
+      return operator.getName() + "( " + left + ", " + right + ")";
+    }
   }
 
   static void checkRlikeFails(SqlOperatorFixture f) {
@@ -6314,6 +6366,25 @@ public class SqlOperatorTest {
     f.checkScalar("rand_integer(2, 11)", 1, "INTEGER NOT NULL");
   }
 
+  /** Test case for <a href="https://issues.apache.org/jira/browse/CALCITE-6283">
+   * [CALCITE-6283] Function array_append with a NULL array argument crashes with
+   * NullPointerException</a>. */
+  @Test void testArrayNullFunc() {
+    final String expected = "Illegal use of 'NULL'";
+    final SqlOperatorFixture f = fixture().withLibrary(SqlLibrary.SPARK);
+    f.checkFails("array_append(^null^, 2)", expected, false);
+    f.checkFails("array_prepend(^null^, 2)", expected, false);
+    f.checkFails("array_remove(^null^, 2)", expected, false);
+    f.checkFails("array_contains(^null^, 2)", expected, false);
+    f.checkFails("array_position(^null^, 2)", expected, false);
+    f.checkFails("^array_min(null)^",
+        "Cannot apply 'ARRAY_MIN' to arguments of type 'ARRAY_MIN\\(<NULL>\\)'."
+            + " Supported form\\(s\\): 'ARRAY_MIN\\(<ARRAY>\\)'", false);
+    f.checkFails("^array_max(null)^",
+        "Cannot apply 'ARRAY_MAX' to arguments of type 'ARRAY_MAX\\(<NULL>\\)'."
+        + " Supported form\\(s\\): 'ARRAY_MAX\\(<ARRAY>\\)'", false);
+  }
+
   /** Tests {@code ARRAY_APPEND} function from Spark. */
   @Test void testArrayAppendFunc() {
     final SqlOperatorFixture f0 = fixture();
@@ -6419,6 +6490,11 @@ public class SqlOperatorTest {
     f.checkType("array_contains(array[1, null], cast(null as integer))", "BOOLEAN");
     f.checkFails("^array_contains(array[1, 2], true)^",
         "INTEGER is not comparable to BOOLEAN", false);
+
+    // check null without cast
+    f.checkNull("array_contains(array[1, 2], null)");
+    f.checkFails("array_contains(^null^, array[1, 2])", "Illegal use of 'NULL'", false);
+    f.checkFails("array_contains(^null^, null)", "Illegal use of 'NULL'", false);
   }
 
   /** Tests {@code ARRAY_DISTINCT} function from Spark. */
@@ -6779,6 +6855,20 @@ public class SqlOperatorTest {
     f.checkNull("array_except(cast(null as integer array), array[1])");
     f.checkNull("array_except(array[1], cast(null as integer array))");
     f.checkNull("array_except(cast(null as integer array), cast(null as integer array))");
+
+    // check null without cast
+    f.checkFails("^array_except(array[1, 2], null)^",
+        "Cannot apply 'ARRAY_EXCEPT' to arguments of type 'ARRAY_EXCEPT\\(<INTEGER ARRAY>, "
+            + "<NULL>\\)'\\. Supported form\\(s\\): 'ARRAY_EXCEPT\\(<EQUIVALENT_TYPE>, "
+            + "<EQUIVALENT_TYPE>\\)'", false);
+    f.checkFails("^array_except(null, array[1, 2])^",
+        "Cannot apply 'ARRAY_EXCEPT' to arguments of type 'ARRAY_EXCEPT\\(<NULL>, "
+            + "<INTEGER ARRAY>\\)'\\. Supported form\\(s\\): 'ARRAY_EXCEPT\\(<EQUIVALENT_TYPE>, "
+            + "<EQUIVALENT_TYPE>\\)'", false);
+    f.checkFails("^array_except(null, null)^",
+        "Cannot apply 'ARRAY_EXCEPT' to arguments of type 'ARRAY_EXCEPT\\(<NULL>, "
+            + "<NULL>\\)'\\. Supported form\\(s\\): 'ARRAY_EXCEPT\\(<EQUIVALENT_TYPE>, "
+            + "<EQUIVALENT_TYPE>\\)'", false);
   }
 
   /** Tests {@code ARRAY_INSERT} function from Spark. */
@@ -6874,6 +6964,20 @@ public class SqlOperatorTest {
     f.checkNull("array_intersect(cast(null as integer array), array[1])");
     f.checkNull("array_intersect(array[1], cast(null as integer array))");
     f.checkNull("array_intersect(cast(null as integer array), cast(null as integer array))");
+
+    // check null without cast
+    f.checkFails("^array_intersect(array[1, 2], null)^",
+        "Cannot apply 'ARRAY_INTERSECT' to arguments of type 'ARRAY_INTERSECT\\(<INTEGER ARRAY>, "
+            + "<NULL>\\)'\\. Supported form\\(s\\): 'ARRAY_INTERSECT\\(<EQUIVALENT_TYPE>, "
+            + "<EQUIVALENT_TYPE>\\)'", false);
+    f.checkFails("^array_intersect(null, array[1, 2])^",
+        "Cannot apply 'ARRAY_INTERSECT' to arguments of type 'ARRAY_INTERSECT\\(<NULL>, "
+            + "<INTEGER ARRAY>\\)'\\. Supported form\\(s\\): 'ARRAY_INTERSECT\\(<EQUIVALENT_TYPE>, "
+            + "<EQUIVALENT_TYPE>\\)'", false);
+    f.checkFails("^array_intersect(null, null)^",
+        "Cannot apply 'ARRAY_INTERSECT' to arguments of type 'ARRAY_INTERSECT\\(<NULL>, "
+            + "<NULL>\\)'\\. Supported form\\(s\\): 'ARRAY_INTERSECT\\(<EQUIVALENT_TYPE>, "
+            + "<EQUIVALENT_TYPE>\\)'", false);
   }
 
   /** Tests {@code ARRAY_UNION} function from Spark. */
