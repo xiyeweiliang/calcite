@@ -1167,9 +1167,11 @@ name will have been converted to upper case also.
 | VARBINARY(n), BINARY VARYING(n) | Variable-length binary string | As BINARY(n)
 | DATE        | Date                      | Example: DATE '1969-07-20'
 | TIME        | Time of day               | Example: TIME '20:17:40'
+| TIME WITH LOCAL TIME ZONE | Time of day with local time zone | Example: TIME WITH LOCAL TIME ZONE '20:17:40'
+| TIME WITH TIME ZONE | Time of day with time zone | Example: TIME '20:17:40 GMT+08'
 | TIMESTAMP [ WITHOUT TIME ZONE ] | Date and time | Example: TIMESTAMP '1969-07-20 20:17:40'
-| TIMESTAMP WITH LOCAL TIME ZONE | Date and time with local time zone | Example: TIMESTAMP '1969-07-20 20:17:40 America/Los Angeles'
-| TIMESTAMP WITH TIME ZONE | Date and time with time zone | Example: TIMESTAMP '1969-07-20 20:17:40 America/Los Angeles'
+| TIMESTAMP WITH LOCAL TIME ZONE | Date and time with local time zone | Example: TIMESTAMP WITH LOCAL TIME ZONE '1969-07-20 20:17:40'
+| TIMESTAMP WITH TIME ZONE | Date and time with time zone | Example: TIMESTAMP WITH TIME ZONE '1969-07-20 20:17:40 America/Los Angeles'
 | INTERVAL timeUnit [ TO timeUnit ] | Date time interval | Examples: INTERVAL '1-5' YEAR TO MONTH, INTERVAL '45' DAY, INTERVAL '1 2:34:56.789' DAY TO SECOND
 | GEOMETRY | Geometry | Examples: ST_GeomFromText('POINT (30 10)')
 
@@ -2813,6 +2815,7 @@ In the following:
 | b | PARSE_TIMESTAMP(format, string[, timeZone])    | Uses format specified by *format* to convert *string* representation of timestamp to a TIMESTAMP WITH LOCAL TIME ZONE value in *timeZone*
 | h s | PARSE_URL(urlString, partToExtract [, keyToExtract] ) | Returns the specified *partToExtract* from the *urlString*. Valid values for *partToExtract* include HOST, PATH, QUERY, REF, PROTOCOL, AUTHORITY, FILE, and USERINFO. *keyToExtract* specifies which query to extract
 | b s | POW(numeric1, numeric2)                      | Returns *numeric1* raised to the power *numeric2*
+| p | RANDOM()                                       | Generates a random double between 0 and 1 inclusive
 | s | REGEXP(string, regexp)                         | Equivalent to `string1 RLIKE string2`
 | b | REGEXP_CONTAINS(string, regexp)                | Returns whether *string* is a partial match for the *regexp*
 | b | REGEXP_EXTRACT(string, regexp [, position [, occurrence]]) | Returns the substring in *string* that matches the *regexp*, starting search at *position* (default 1), and until locating the nth *occurrence* (default 1). Returns NULL if there is no match
